@@ -563,18 +563,6 @@ export default function App() {
               </div>
 
               <div className={cn("flex-1 w-full min-h-[300px] relative select-none", hoverState.isActive ? "cursor-crosshair" : "cursor-default")}>
-                {/* Debug UI */}
-                <div className="absolute top-0 right-0 bg-white/90 backdrop-blur-sm text-[8px] font-mono px-2 py-1.5 rounded-bl-lg border-l border-b border-[#F4F4F5] z-[100] pointer-events-none text-[#A1A1AA] flex flex-col gap-1 uppercase tracking-widest min-w-[120px]">
-                  <div className="flex justify-between">
-                    <span>Active:</span>
-                    <span className={hoverState.isActive ? "text-[#FF4C00] font-bold" : ""}>{hoverState.isActive ? 'YES' : 'NO'}</span>
-                  </div>
-                  <div className="flex justify-between text-[7px]">
-                    <span>Coords:</span>
-                    <span>{hoverState.isActive ? `${Math.round(hoverState.x)},${Math.round(hoverState.y)}` : 'MISS'}</span>
-                  </div>
-                </div>
-
                 {/* Custom Target Label */}
                 <div className="absolute left-0 top-0 -mt-6 text-[13px] text-[#FF5400] z-10 pointer-events-none select-none">Target</div>
                 
