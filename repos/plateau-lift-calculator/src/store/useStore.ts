@@ -33,6 +33,7 @@ interface AppState {
   deleteSession: (exerciseId: string, sessionId: string) => void;
   setTargetValue: (exerciseId: string, val: number) => void;
   deleteExercise: (id: string) => void;
+  clearAllData: () => void;
 }
 
 const defaultExercises: Exercise[] = [
@@ -157,6 +158,11 @@ export const useStore = create<AppState>()(
           exercises: newExercises,
           activeExerciseId: newActiveId
         };
+      }),
+      clearAllData: () => set({
+        exercises: [],
+        activeExerciseId: null,
+        mode: 'weightlifting'
       }),
     }),
     {
