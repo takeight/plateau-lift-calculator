@@ -58,6 +58,11 @@ export default function App() {
 
   const [isHoveringTargetDate, setIsHoveringTargetDate] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  
+  // Refs for high-frequency DOM updates (performance optimization)
+  const verticalLineRef = useRef<HTMLDivElement>(null);
+  const floatingLabelRef = useRef<HTMLDivElement>(null);
+  const followDotRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -582,36 +587,26 @@ export default function App() {
                     transition={{ duration: 0.5 }}
                     className="w-full h-full absolute inset-0 z-20 outline-none"
                   >
-                    {/* Hover Visuals */}
-                    {hoverState.isActive && (
-                      <>
-                        <div 
-                          className="absolute top-0 bottom-0 w-[1px] bg-[#F4F4F5] z-[25] pointer-events-none"
-                          style={{ left: hoverState.x }}
-                        />
-                        <div 
-                          className="absolute bg-white border border-[#F4F4F5] px-2 py-1 rounded shadow-sm text-[9px] font-mono text-[#A1A1AA] z-[40] pointer-events-none whitespace-nowrap"
-                          style={{ 
-                            left: hoverState.x + 12, 
-                            top: hoverState.y - 30,
-                            transform: 'translateY(-50%)'
-                          }}
-                        >
-                          {hoverState.dateLabel}
-                        </div>
-                        <div 
-                          className={cn(
-                            "absolute border border-white rounded-full z-[35] pointer-events-none transition-all duration-75",
-                            hoverState.isExisting ? "w-[12px] h-[12px] bg-[#FF4C00]" : "w-2.5 h-2.5 bg-black"
-                          )}
-                          style={{ 
-                            left: hoverState.x, 
-                            top: hoverState.y,
-                            transform: 'translate(-50%, -50%)'
-                          }}
-                        />
-                      </>
-                    )}
+                    {/* Hover Visuals (Ref-based for Performance) */}
+                    <div 
+                      ref={verticalLineRef}
+                      className="absolute top-0 bottom-[30px] w-[1px] bg-[#F4F4F5] z-[25] pointer-events-none opacity-0 transition-opacity duration-150"
+                    />
+                    <div 
+                      ref={floatingLabelRef}
+                      className="absolute bg-white border border-[#F4F4F5] px-2 py-1 rounded shadow-sm text-[9px] font-mono text-[#A1A1AA] z-[40] pointer-events-none whitespace-nowrap opacity-0 transition-opacity duration-150"
+                      style={{ transform: 'translateY(-50%)' }}
+                    >
+                      {hoverState.dateLabel}
+                    </div>
+                    <div 
+                      ref={followDotRef}
+                      className={cn(
+                        "absolute border border-white rounded-full z-[35] pointer-events-none opacity-0 transition-opacity duration-150",
+                        hoverState.isExisting ? "w-[14px] h-[14px] bg-[#FF4C00]" : "w-[8px] h-[8px] bg-black"
+                      )}
+                      style={{ transform: 'translate(-50%, -50%)' }}
+                    />
 
                     {/* Event Capture Overlay */}
                     <div 
@@ -631,22 +626,50 @@ export default function App() {
                           const end = addDays(start, 6);
                           const weekRange = `${format(start, 'MMM d')} - ${format(end, 'd')}`;
                           
+                          // Corrected Y Snapping Math (Accounting for 10px top margin and 30px XAxis)
                           const yVal = payload.lineYValue ?? payload.actual ?? yDomain[0];
-                          const chartHeight = rect.height;
-                          const effectiveHeight = chartHeight - 10;
-                          const yPos = effectiveHeight - ((yVal - yDomain[0]) / (yDomain[1] - yDomain[0]) * effectiveHeight) + 10;
+                          const plotHeight = rect.height - 40;
+                          const yPos = 10 + (1 - (yVal - yDomain[0]) / (yDomain[1] - yDomain[0])) * plotHeight;
 
-                          setHoverState({
-                            isActive: true,
-                            timestamp: payload.timestamp,
-                            dateLabel: weekRange.toUpperCase(),
-                            x: x,
-                            y: yPos,
-                            isExisting: payload.actual !== null
-                          });
+                          // Direct DOM updates for zero-lag high-frequency motion
+                          if (verticalLineRef.current) {
+                            verticalLineRef.current.style.opacity = '1';
+                            verticalLineRef.current.style.left = `${x}px`;
+                          }
+                          if (floatingLabelRef.current) {
+                            floatingLabelRef.current.style.opacity = '1';
+                            floatingLabelRef.current.style.left = `${x + 12}px`;
+                            floatingLabelRef.current.style.top = `${yPos - 24}px`;
+                            floatingLabelRef.current.innerText = weekRange.toUpperCase();
+                          }
+                          if (followDotRef.current) {
+                            followDotRef.current.style.opacity = '1';
+                            followDotRef.current.style.left = `${x}px`;
+                            followDotRef.current.style.top = `${yPos}px`;
+                            // Update class for size/color if state changed
+                            followDotRef.current.className = cn(
+                              "absolute border border-white rounded-full z-[35] pointer-events-none transition-all duration-75",
+                              payload.actual !== null ? "w-[14px] h-[14px] bg-[#FF4C00]" : "w-[8px] h-[8px] bg-black"
+                            );
+                          }
+
+                          // Only trigger React re-render when the day actually changes
+                          if (hoverState.timestamp !== payload.timestamp || !hoverState.isActive) {
+                            setHoverState({
+                              isActive: true,
+                              timestamp: payload.timestamp,
+                              dateLabel: weekRange.toUpperCase(),
+                              x: x,
+                              y: yPos,
+                              isExisting: payload.actual !== null
+                            });
+                          }
                         }
                       }}
                       onMouseLeave={() => {
+                        if (verticalLineRef.current) verticalLineRef.current.style.opacity = '0';
+                        if (floatingLabelRef.current) floatingLabelRef.current.style.opacity = '0';
+                        if (followDotRef.current) followDotRef.current.style.opacity = '0';
                         setHoverState(prev => ({ ...prev, isActive: false }));
                       }}
                       onMouseDown={() => {
