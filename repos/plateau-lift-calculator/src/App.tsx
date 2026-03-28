@@ -617,8 +617,6 @@ export default function App() {
                   </div>
 
                   <div className={cn("flex-1 w-full min-h-[300px] relative select-none", hoverState.isActive ? "cursor-crosshair" : "cursor-default")}>
-                    {/* Custom Target Label */}
-                    <div className="absolute left-0 top-0 -mt-6 text-[13px] text-[#FF5400] z-10 pointer-events-none select-none">Target</div>
                     
                     <AnimatePresence mode="wait">
                       <motion.div
@@ -817,7 +815,27 @@ export default function App() {
                         })()}
                         <YAxis domain={yDomain} hide />
                             <Tooltip shared={true} wrapperStyle={{ display: 'none' }} />
-                            <ReferenceLine y={targetValue} stroke="#FF5400" strokeWidth={2} strokeDasharray="24 8" style={{ pointerEvents: 'none' }} />
+                            <ReferenceLine 
+                              y={targetValue} 
+                              stroke="#FF5400" 
+                              strokeWidth={2} 
+                              strokeDasharray="24 8" 
+                              style={{ pointerEvents: 'none' }} 
+                              label={({ viewBox }) => (
+                                <text 
+                                  x={viewBox.x + 20} 
+                                  y={viewBox.y - 8} 
+                                  fill="#FF5400" 
+                                  fontSize={10} 
+                                  fontFamily="JetBrains Mono" 
+                                  fontWeight={700}
+                                  textAnchor="start"
+                                  className="uppercase tracking-widest"
+                                >
+                                  Target
+                                </text>
+                              )}
+                            />
                             
                             <Line type="linear" dataKey="lineYValue" stroke="transparent" strokeWidth={60} dot={false} activeDot={false} isAnimationActive={false} />
 
