@@ -36,36 +36,13 @@ interface AppState {
   clearAllData: () => void;
 }
 
-const defaultExercises: Exercise[] = [
-  {
-    id: 'ex1',
-    name: 'Barbell Squat',
-    mode: 'weightlifting',
-    targetValue: 120,
-    sessions: [
-      { id: '1', sessionNumber: 1, date: new Date('2025-10-01').getTime(), value: 100 },
-      { id: '2', sessionNumber: 2, date: new Date('2025-10-15').getTime(), value: 102 },
-      { id: '3', sessionNumber: 3, date: new Date('2025-11-01').getTime(), value: 105 },
-      { id: '4', sessionNumber: 4, date: new Date('2025-11-15').getTime(), value: 108 },
-      { id: '5', sessionNumber: 5, date: new Date('2025-12-01').getTime(), value: 110 },
-    ]
-  },
-  {
-    id: 'ex2',
-    name: '5k Run',
-    mode: 'running',
-    targetValue: 1200,
-    sessions: []
-  }
-];
-
 export const useStore = create<AppState>()(
   persist(
     (set) => ({
       mode: 'weightlifting',
       unit: 'metric',
-      exercises: defaultExercises,
-      activeExerciseId: 'ex1',
+      exercises: [],
+      activeExerciseId: null,
       setMode: (mode) => set((state) => {
         const firstExerciseOfMode = state.exercises.find(e => e.mode === mode);
         return { 

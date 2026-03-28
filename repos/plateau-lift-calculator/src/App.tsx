@@ -37,6 +37,7 @@ export default function App() {
   const [exerciseToDelete, setExerciseToDelete] = useState<string | null>(null);
   const [isOnboarding, setIsOnboarding] = useState(exercises.length === 0);
   const [pendingExerciseName, setPendingExerciseName] = useState<string | null>(null);
+  const [isSessionOnboardingOpen, setIsSessionOnboardingOpen] = useState(false);
   
   const [editingNode, setEditingNode] = useState<{ id: string, x: number, y: number, value: number, dateLabel: string, timestamp?: number } | null>(null);
   const [editNodeValue, setEditNodeValue] = useState('');
@@ -262,16 +263,37 @@ export default function App() {
     return Math.max(...sessions.map(s => s.value));
   }, [sessions, mode]);
 
-  const currentLoadRatio = useMemo(() => {
-    if (sessions.length === 0 || peakValue === 0) return 0;
-    const current = sessions[sessions.length - 1].value;
-    if (mode === 'running') {
-      return peakValue / current;
-    }
-    return current / peakValue;
-  }, [sessions, peakValue, mode]);
+  // Robust Training Load: Acute:Chronic Workload Ratio (ACWR)
+  const trainingLoadData = useMemo(() => {
+    if (sessions.length < 3) return { ratio: 0, status: 'Insufficient Data', label: 'Low' };
+    
+    const now = Date.now();
+    const oneDay = 24 * 60 * 60 * 1000;
+    
+    // Acute Load: Last 7 days
+    const acuteSessions = sessions.filter(s => (now - s.date) <= 7 * oneDay);
+    const acuteLoad = acuteSessions.length > 0 
+      ? acuteSessions.reduce((acc, s) => acc + s.value, 0) / acuteSessions.length 
+      : sessions[sessions.length - 1].value;
 
-  const loadSegments = Math.max(1, Math.min(5, Math.round(currentLoadRatio * 5)));
+    // Chronic Load: Last 28 days
+    const chronicSessions = sessions.filter(s => (now - s.date) <= 28 * oneDay);
+    const chronicLoad = chronicSessions.length > 0 
+      ? chronicSessions.reduce((acc, s) => acc + s.value, 0) / chronicSessions.length 
+      : sessions.reduce((acc, s) => acc + s.value, 0) / sessions.length;
+
+    const ratio = chronicLoad > 0 ? acuteLoad / chronicLoad : 0;
+    
+    let status = 'Productive';
+    let label = 'Medium';
+    if (ratio > 1.5) { status = 'Overtraining'; label = 'High'; }
+    else if (ratio > 1.3) { status = 'Aggressive'; label = 'High'; }
+    else if (ratio < 0.8) { status = 'Detraining'; label = 'Low'; }
+    
+    return { ratio, status, label };
+  }, [sessions, mode]);
+
+  const loadSegments = Math.max(1, Math.min(5, Math.round(trainingLoadData.ratio * 3)));
 
   const yDomain = useMemo(() => {
     if (chartData.length === 0) return [0, 100];
@@ -414,12 +436,12 @@ export default function App() {
             <div className="flex flex-col gap-2 flex-1 w-full max-w-[419px]">
               <div className="flex justify-between items-baseline">
                 <span className="text-lg md:text-xl xl:text-2xl font-light tracking-tighter">Training Load</span>
-                <span className="text-lg md:text-xl xl:text-2xl font-light tracking-tighter">{loadSegments >= 4 ? 'High' : loadSegments >= 2 ? 'Medium' : 'Low'}</span>
+                <span className="text-lg md:text-xl xl:text-2xl font-light tracking-tighter">{trainingLoadData.status}</span>
               </div>
               <div className="h-3 w-full bg-gradient-to-r from-[#FFDBCC] to-[#FF4C00] rounded-lg relative overflow-hidden">
                 <div 
                   className="absolute right-0 top-0 bottom-0 bg-white/90 transition-all duration-500" 
-                  style={{ width: `${100 - (currentLoadRatio * 100)}%` }}
+                  style={{ width: `${Math.max(0, 100 - (trainingLoadData.ratio * 100))}%` }}
                 />
               </div>
             </div>
@@ -427,7 +449,7 @@ export default function App() {
         </div>
 
         {/* Main Content Split */}
-        <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-0">
           
           {/* Sidebar */}
           <div className={cn(
@@ -444,10 +466,19 @@ export default function App() {
                 "flex flex-col gap-1.5 p-2 -m-2 rounded-lg border transition-colors",
                 (hoverState.isActive || !!editingNode) ? "border-[#FF4C00]" : "border-transparent"
               )}>
-                <label className={cn(
-                  "text-[9px] md:text-[10px] font-mono font-medium uppercase tracking-wider transition-colors",
-                  (hoverState.isActive || !!editingNode) ? "text-[#FF4C00]" : "text-black"
-                )}>Date</label>
+                <div className="flex justify-between items-center">
+                  <label className={cn(
+                    "text-[9px] md:text-[10px] font-mono font-medium uppercase tracking-wider transition-colors",
+                    (hoverState.isActive || !!editingNode) ? "text-[#FF4C00]" : "text-black"
+                  )}>Date</label>
+                  <button 
+                    type="button"
+                    onClick={() => setDateInput(format(new Date(), 'yyyy-MM-dd'))}
+                    className="text-[9px] font-mono uppercase tracking-widest text-[#A1A1AA] hover:text-black transition-colors"
+                  >
+                    Today
+                  </button>
+                </div>
                 <input 
                   type="date" 
                   value={dateInput}
@@ -619,135 +650,172 @@ export default function App() {
                           style={{ transform: 'translate(-50%, -50%)' }}
                         />
 
-                        {/* Event Capture Overlay */}
-                        <div 
-                          className="absolute inset-0 z-[30] cursor-crosshair"
-                          onMouseMove={(e) => {
-                            const rect = e.currentTarget.getBoundingClientRect();
-                            const x = e.clientX - rect.left;
-                            const chartWidth = rect.width - 10;
-                            const percent = Math.min(Math.max(x / chartWidth, 0), 1);
-                            
-                            const index = Math.round(percent * (chartData.length - 1));
-                            const payload = chartData[index];
+                    <div 
+                      className="absolute inset-0 z-[30] cursor-crosshair"
+                      onMouseMove={(e) => {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const mouseX = e.clientX - rect.left;
+                        const chartWidth = rect.width; // match margin right 0
+                        const percent = Math.min(Math.max(mouseX / chartWidth, 0), 1);
+                        
+                        const index = Math.round(percent * (chartData.length - 1));
+                        const payload = chartData[index];
 
-                            if (payload) {
-                              const date = new Date(payload.timestamp);
-                              const start = startOfWeek(date);
-                              const end = addDays(start, 6);
-                              const weekRange = `${format(start, 'MMM d')} - ${format(end, 'd')}`;
-                              
-                              // Corrected Y Snapping Math (Accounting for 10px top margin and 30px XAxis)
-                              const yVal = payload.lineYValue ?? payload.actual ?? yDomain[0];
-                              const plotHeight = rect.height - 40;
-                              const yPos = 10 + (1 - (yVal - yDomain[0]) / (yDomain[1] - yDomain[0])) * plotHeight;
+                        if (payload) {
+                          const date = new Date(payload.timestamp);
+                          const start = startOfWeek(date);
+                          const end = addDays(start, 6);
+                          const weekRange = `${format(start, 'MMM d')} - ${format(end, 'd')}`;
+                          
+                          // Snapped X (Center of the day column)
+                          const snappedX = (index / (chartData.length - 1)) * chartWidth;
 
-                              // Direct DOM updates for zero-lag high-frequency motion
-                              if (verticalLineRef.current) {
-                                verticalLineRef.current.style.opacity = '1';
-                                verticalLineRef.current.style.left = `${x}px`;
-                              }
-                              if (floatingLabelRef.current) {
-                                floatingLabelRef.current.style.opacity = '1';
-                                floatingLabelRef.current.style.left = `${x + 12}px`;
-                                floatingLabelRef.current.style.top = `${yPos - 24}px`;
-                                floatingLabelRef.current.innerText = weekRange.toUpperCase();
-                              }
-                              if (followDotRef.current) {
-                                followDotRef.current.style.opacity = '1';
-                                followDotRef.current.style.left = `${x}px`;
-                                followDotRef.current.style.top = `${yPos}px`;
-                                // Update class for size/color if state changed
-                                followDotRef.current.className = cn(
-                                  "absolute border border-white rounded-full z-[35] pointer-events-none transition-all duration-75",
-                                  payload.actual !== null ? "w-[14px] h-[14px] bg-[#FF4C00]" : "w-[8px] h-[8px] bg-black"
-                                );
-                              }
+                          // Corrected Y Snapping Math (Accounting for 10px top margin and 24px bottom margin + 54px XAxis height)
+                          const yVal = payload.lineYValue ?? payload.actual ?? yDomain[0];
+                          const plotHeight = rect.height - 88; // 10 top + 24 margin + 54 height
+                          const yPos = 10 + (1 - (yVal - yDomain[0]) / (yDomain[1] - yDomain[0])) * plotHeight;
 
-                              // Only trigger React re-render when the day actually changes
-                              if (hoverState.timestamp !== payload.timestamp || !hoverState.isActive) {
-                                setHoverState({
-                                  isActive: true,
-                                  timestamp: payload.timestamp,
-                                  dateLabel: weekRange.toUpperCase(),
-                                  x: x,
-                                  y: yPos,
-                                  isExisting: payload.actual !== null
-                                });
-                              }
+                          // Direct DOM updates for zero-lag high-frequency motion
+                          if (verticalLineRef.current) {
+                            verticalLineRef.current.style.opacity = '1';
+                            verticalLineRef.current.style.left = `${snappedX}px`;
+                          }
+                          if (floatingLabelRef.current) {
+                            floatingLabelRef.current.style.opacity = '1';
+                            floatingLabelRef.current.style.left = `${snappedX + 12}px`;
+                            floatingLabelRef.current.style.top = `${yPos - 24}px`;
+                            floatingLabelRef.current.innerText = weekRange.toUpperCase();
+                          }
+                          if (followDotRef.current) {
+                            followDotRef.current.style.opacity = '1';
+                            followDotRef.current.style.left = `${snappedX}px`;
+                            followDotRef.current.style.top = `${yPos}px`;
+                            followDotRef.current.className = cn(
+                              "absolute border border-white rounded-full z-[35] pointer-events-none transition-all duration-75",
+                              payload.actual !== null ? "w-[14px] h-[14px] bg-[#FF4C00]" : "w-[8px] h-[8px] bg-black"
+                            );
+                          }
+
+                          // Only trigger React re-render when the day actually changes
+                          if (hoverState.timestamp !== payload.timestamp || !hoverState.isActive) {
+                            setHoverState({
+                              isActive: true,
+                              timestamp: payload.timestamp,
+                              dateLabel: weekRange.toUpperCase(),
+                              x: snappedX,
+                              y: yPos,
+                              isExisting: payload.actual !== null
+                            });
+                          }
+                        }
+                      }}
+                      onMouseLeave={() => {
+                        if (verticalLineRef.current) verticalLineRef.current.style.opacity = '0';
+                        if (floatingLabelRef.current) floatingLabelRef.current.style.opacity = '0';
+                        if (followDotRef.current) followDotRef.current.style.opacity = '0';
+                        setHoverState(prev => ({ ...prev, isActive: false }));
+                      }}
+                      onMouseDown={() => {
+                        if (editingNode) {
+                          setEditingNode(null);
+                          return;
+                        }
+
+                        if (hoverState.isActive && hoverState.timestamp) {
+                          const payload = chartLookup[hoverState.timestamp];
+                          if (payload) {
+                            if (payload.actual !== null) {
+                              setEditingNode({
+                                id: payload.sessionId,
+                                x: hoverState.x,
+                                y: hoverState.y,
+                                value: payload.actual,
+                                dateLabel: payload.dateLabel,
+                                timestamp: payload.timestamp
+                              });
+                              setEditNodeValue(mode === 'running' ? formatSecondsToTime(payload.actual) : payload.actual.toString());
+                            } else {
+                              setEditingNode({
+                                id: 'new',
+                                x: hoverState.x,
+                                y: hoverState.y,
+                                value: payload.lineYValue !== null ? payload.lineYValue : 0,
+                                dateLabel: payload.dateLabel,
+                                timestamp: payload.timestamp
+                              });
+                              const initialVal = payload.lineYValue !== null ? payload.lineYValue : 0;
+                              setEditNodeValue(mode === 'running' ? formatSecondsToTime(initialVal) : initialVal.toFixed(1));
                             }
-                          }}
-                          onMouseLeave={() => {
-                            if (verticalLineRef.current) verticalLineRef.current.style.opacity = '0';
-                            if (floatingLabelRef.current) floatingLabelRef.current.style.opacity = '0';
-                            if (followDotRef.current) followDotRef.current.style.opacity = '0';
-                            setHoverState(prev => ({ ...prev, isActive: false }));
-                          }}
-                          onMouseDown={() => {
-                            if (editingNode) {
-                              setEditingNode(null);
-                              return;
-                            }
-
-                            if (hoverState.isActive && hoverState.timestamp) {
-                              const payload = chartLookup[hoverState.timestamp];
-                              if (payload) {
-                                if (payload.actual !== null) {
-                                  setEditingNode({
-                                    id: payload.sessionId,
-                                    x: hoverState.x,
-                                    y: hoverState.y,
-                                    value: payload.actual,
-                                    dateLabel: payload.dateLabel,
-                                    timestamp: payload.timestamp
-                                  });
-                                  setEditNodeValue(mode === 'running' ? formatSecondsToTime(payload.actual) : payload.actual.toString());
-                                } else {
-                                  setEditingNode({
-                                    id: 'new',
-                                    x: hoverState.x,
-                                    y: hoverState.y,
-                                    value: payload.lineYValue !== null ? payload.lineYValue : 0,
-                                    dateLabel: payload.dateLabel,
-                                    timestamp: payload.timestamp
-                                  });
-                                  const initialVal = payload.lineYValue !== null ? payload.lineYValue : 0;
-                                  setEditNodeValue(mode === 'running' ? formatSecondsToTime(initialVal) : initialVal.toFixed(1));
-                                }
-                              }
-                            }
+                          }
+                        }
+                      }}
+                    />
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart 
+                        data={chartData} 
+                        className="outline-none"
+                        style={{ outline: 'none' }}
+                        margin={{ top: 10, right: 0, left: 0, bottom: 24 }}
+                      >                        <CartesianGrid strokeDasharray="0" vertical={false} horizontal={false} stroke="#F4F4F5" style={{ pointerEvents: 'none' }} />
+                        <XAxis 
+                          dataKey="timestamp" 
+                          type="number"
+                          domain={['dataMin', 'dataMax']}
+                          scale="time"
+                          height={54} // 30 height + 24 gap
+                          axisLine={false} 
+                          tickLine={false} 
+                          ticks={chartData.filter(d => d.isMonthMarker).map(d => d.timestamp)}
+                          style={{ pointerEvents: 'none' }}
+                          tick={(props: any) => {
+                            const { x, y, payload } = props;
+                            const dataPoint = chartData.find(d => d.timestamp === payload.value && d.isMonthMarker);
+                            if (!dataPoint) return null;
+                            return (
+                              <text x={x} y={y + 39} fill="#D4D4D8" fontSize={10} fontFamily="JetBrains Mono" fontWeight={700} letterSpacing="1px" textAnchor="middle" className="pointer-events-none">
+                                {dataPoint.monthLabel}
+                              </text>
+                            );
                           }}
                         />
-                        <ResponsiveContainer width="100%" height="100%">
-                          <LineChart 
-                            data={chartData} 
-                            className="outline-none"
-                            style={{ outline: 'none' }}
-                            margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
-                          >
-                            <CartesianGrid strokeDasharray="0" vertical={true} horizontal={false} stroke="#F4F4F5" style={{ pointerEvents: 'none' }} />
-                            <XAxis 
-                              dataKey="timestamp" 
-                              type="number"
-                              domain={['dataMin', 'dataMax']}
-                              scale="time"
-                              height={30}
-                              axisLine={false} 
-                              tickLine={false} 
-                              ticks={chartData.filter(d => d.isMonthMarker).map(d => d.timestamp)}
-                              style={{ pointerEvents: 'none' }}
-                              tick={(props: any) => {
-                                const { x, y, payload } = props;
-                                const dataPoint = chartData.find(d => d.timestamp === payload.value && d.isMonthMarker);
-                                if (!dataPoint) return null;
-                                return (
-                                  <text x={x} y={y + 15} fill="#D4D4D8" fontSize={10} fontFamily="JetBrains Mono" fontWeight={700} letterSpacing="1px" textAnchor="middle" className="pointer-events-none">
-                                    {dataPoint.monthLabel}
-                                  </text>
-                                );
-                              }}
-                            />
-                            <YAxis domain={yDomain} hide />
+                        {/* Layered Y-Axis Labels (Super-imposed within plot area) */}
+                        {(() => {
+                          const [min, max] = yDomain;
+                          const steps = 5;
+                          return Array.from({ length: steps }).map((_, i) => {
+                            const val = min + (max - min) * (i / (steps - 1));
+                            return (
+                              <ReferenceLine 
+                                key={i}
+                                y={val} 
+                                stroke="#F4F4F5"
+                                strokeWidth={1}
+                                label={({ viewBox }) => (
+                                  <g className="pointer-events-none">
+                                    <rect 
+                                      x={viewBox.x + viewBox.width - 48} 
+                                      y={viewBox.y - 6} 
+                                      width={40} 
+                                      height={12} 
+                                      fill="#FFFFFF"
+                                    />
+                                    <text 
+                                      x={viewBox.x + viewBox.width - 8} 
+                                      y={viewBox.y + 3} 
+                                      fill="#D4D4D8" 
+                                      fontSize={9} 
+                                      fontFamily="JetBrains Mono" 
+                                      textAnchor="end"
+                                    >
+                                      {formatMetric(val)}
+                                    </text>
+                                  </g>
+                                )}
+                              />
+                            );
+                          });
+                        })()}
+                        <YAxis domain={yDomain} hide />
                             <Tooltip shared={true} wrapperStyle={{ display: 'none' }} />
                             <ReferenceLine y={targetValue} stroke="#FF5400" strokeWidth={2} strokeDasharray="24 8" style={{ pointerEvents: 'none' }} />
                             
@@ -986,6 +1054,66 @@ export default function App() {
         </div>
       )}
 
+      {/* Session Entry Onboarding Popover */}
+      <AnimatePresence>
+        {isSessionOnboardingOpen && (
+          <div className="hidden lg:block fixed inset-0 z-[110] pointer-events-none">
+            <div className="max-w-[1216px] mx-auto w-full px-8 pt-[300px] relative h-full"> {/* Roughly aligned with sidebar height */}
+              <motion.div 
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="absolute left-[340px] top-[480px] w-[280px] bg-white rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.15)] border border-[#F4F4F5] p-6 pointer-events-auto"
+              >
+                <div className="flex gap-4 items-start">
+                  <div className="shrink-0 w-8 h-8 rounded-full bg-[#FF4C00] flex items-center justify-center">
+                    <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M19 12H5M12 19l-7-7 7-7"/>
+                    </svg>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <h3 className="text-sm font-medium font-sans">Add 3 session entries</h3>
+                    <p className="text-[10px] text-[#A1A1AA] font-mono uppercase tracking-widest leading-relaxed">
+                      Start by logging your performance history here.
+                    </p>
+                    <button 
+                      onClick={() => setIsSessionOnboardingOpen(false)}
+                      className="mt-2 text-[10px] font-mono uppercase tracking-widest text-black hover:text-[#FF4C00] transition-colors flex items-center gap-1"
+                    >
+                      Dismiss <span>&times;</span>
+                    </button>
+                  </div>
+                </div>
+                {/* Arrow Pointer */}
+                <div className="absolute top-6 -left-2 w-4 h-4 bg-white border-l border-b border-[#F4F4F5] rotate-45" />
+              </motion.div>
+            </div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Mobile Version (centered) */}
+      <AnimatePresence>
+        {isSessionOnboardingOpen && (
+          <div className="lg:hidden fixed bottom-8 left-4 right-4 z-[110]">
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              className="bg-white rounded-xl shadow-2xl border border-[#F4F4F5] p-5"
+            >
+              <div className="flex justify-between items-start mb-2">
+                <h3 className="text-sm font-medium">Add 3 session entries</h3>
+                <button onClick={() => setIsSessionOnboardingOpen(false)}><X className="w-4 h-4 text-[#A1A1AA]" /></button>
+              </div>
+              <p className="text-[10px] text-[#A1A1AA] font-mono uppercase tracking-widest">
+                Log entries in the sidebar to start tracking.
+              </p>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* New Exercise Modal */}
       {isNewExerciseModalOpen && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -1072,9 +1200,13 @@ export default function App() {
                         else val = parseFloat(targetInput);
                         
                         if (!isNaN(val) && val > 0) {
+                          const isFirstExercise = exercises.length === 0;
                           addExercise(pendingExerciseName, mode, val);
                           setIsNewExerciseModalOpen(false);
                           setPendingExerciseName(null);
+                          if (isFirstExercise) {
+                            setIsSessionOnboardingOpen(true);
+                          }
                         }
                       }}
                       className="flex-[2] bg-black text-white py-4 rounded-xl text-xs font-mono uppercase tracking-widest hover:bg-zinc-800 transition-all shadow-xl shadow-black/10 active:scale-[0.98]"
